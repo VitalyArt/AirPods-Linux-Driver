@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=Airpods Driver
+Exec=airpods-driver
+Icon=com.vitalyart.airpods-driver
+Type=Application
+Categories=Utility;
+StartupWMClass=com.vitalyart.airpods-driver

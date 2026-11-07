@@ -1,0 +1,7 @@
+# The packaging image only needs its Dockerfile and tool installer.
+# Keep this allowlist in sync with the Dockerfile-specific ignore file.
+**
+!scripts/
+!scripts/packaging/
+!scripts/packaging/packaging.Dockerfile
+!scripts/packaging/install-appimage-tools.py

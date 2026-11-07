@@ -1,0 +1,15 @@
+{
+  "runtime": "org.freedesktop.Platform",
+  "runtime-version": "25.08",
+  "finish-args": [
+    "--socket=wayland",
+    "--socket=fallback-x11",
+    "--socket=pulseaudio",
+    "--system-talk-name=org.bluez",
+    "--allow=bluetooth",
+    "--share=network",
+    "--talk-name=org.kde.StatusNotifierWatcher",
+    "--talk-name=org.freedesktop.Notifications",
+    "--talk-name=org.mpris.MediaPlayer2.*"
+  ]
+}

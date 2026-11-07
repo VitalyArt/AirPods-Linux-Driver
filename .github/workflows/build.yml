@@ -1,0 +1,169 @@
+name: Build and release
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  linux-packages:
+    name: Linux packages (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    env:
+      PACKAGING_IMAGE: airpods-driver-packaging:ubuntu24
+      PACKAGING_SKIP_IMAGE_BUILD: "1"
+      PACKAGING_CACHE_DIR: ${{ github.workspace }}/.cache/packaging
+      RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Validate release version before building
+        run: python3 scripts/packaging/prepare-release.py --check-only
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and cache packaging image
+        id: packaging-image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: scripts/packaging/packaging.Dockerfile
+          tags: ${{ env.PACKAGING_IMAGE }}
+          load: true
+          cache-from: type=gha,scope=packaging-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=packaging-${{ matrix.arch }}
+
+      - name: Restore Cargo caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            .cache/packaging/registry
+            .cache/packaging/git
+            .cache/packaging/target-${{ matrix.arch }}
+          key: cargo-v1-${{ runner.os }}-${{ matrix.arch }}-${{ steps.packaging-image.outputs.imageid }}-${{ hashFiles('Cargo.lock') }}-${{ github.sha }}
+          restore-keys: |
+            cargo-v1-${{ runner.os }}-${{ matrix.arch }}-${{ steps.packaging-image.outputs.imageid }}-${{ hashFiles('Cargo.lock') }}-
+            cargo-v1-${{ runner.os }}-${{ matrix.arch }}-${{ steps.packaging-image.outputs.imageid }}-
+
+      - name: Restore Flatpak runtime cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/packaging/flatpak-${{ matrix.arch }}
+          key: flatpak-v1-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('packaging/flatpak/package.json') }}-${{ github.sha }}
+          restore-keys: |
+            flatpak-v1-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('packaging/flatpak/package.json') }}-
+
+      - name: Prepare caches for the root user in the container
+        env:
+          PACKAGE_ARCH: ${{ matrix.arch }}
+        run: |
+          mkdir -p "$PACKAGING_CACHE_DIR/registry" "$PACKAGING_CACHE_DIR/git" \
+            "$PACKAGING_CACHE_DIR/target-$PACKAGE_ARCH" "$PACKAGING_CACHE_DIR/flatpak-$PACKAGE_ARCH"
+          sudo chown -R root:root "$PACKAGING_CACHE_DIR"
+
+      - name: Test in packaging container
+        run: bash scripts/packaging/package-docker.sh test
+
+      - name: Build and verify all four formats in Docker
+        run: make build-packages
+
+      - name: Verify DEB installation in a clean Ubuntu container
+        run: |
+          docker run --rm -v "$PWD:/src:ro" -w /src ubuntu:24.04 bash -ec '
+            apt-get update
+            apt-get install -y /src/dist/*.deb desktop-file-utils xvfb x11-utils dbus-x11 libgl1-mesa-dri
+            bash scripts/verify/verify-installed.sh
+            bash scripts/verify/verify-gui.sh airpods-driver
+            apt-get remove -y airpods-driver
+            test ! -e /usr/bin/airpods-driver'
+
+      - name: Verify RPM installation in a clean Fedora container
+        run: |
+          docker run --rm -v "$PWD:/src:ro" -w /src fedora:43 bash -ec '
+            dnf install -y /src/dist/*.rpm desktop-file-utils xorg-x11-server-Xvfb xwininfo dbus-daemon mesa-dri-drivers
+            bash scripts/verify/verify-installed.sh
+            bash scripts/verify/verify-gui.sh airpods-driver
+            dnf remove -y airpods-driver
+            test ! -e /usr/bin/airpods-driver'
+
+      - name: Verify AppImage in a clean Ubuntu container without FUSE
+        run: |
+          docker run --rm -v "$PWD:/src:ro" -w /src ubuntu:24.04 bash -ec '
+            apt-get update
+            apt-get install -y desktop-file-utils libx11-6 libx11-xcb1 libgl1 libegl1 libwayland-client0 xvfb x11-utils dbus-x11 libgl1-mesa-dri
+            bash scripts/verify/verify-appimage.sh /src/dist/*.AppImage
+            bash scripts/verify/verify-gui.sh env APPIMAGE_EXTRACT_AND_RUN=1 /src/dist/*.AppImage'
+
+      - name: Make container caches readable for saving
+        if: always()
+        run: |
+          if [[ -d "$PACKAGING_CACHE_DIR" ]]; then
+            sudo chown -R "$(id -u):$(id -g)" "$PACKAGING_CACHE_DIR"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: airpods-driver-linux-${{ matrix.arch }}
+          path: |
+            dist/*.deb
+            dist/*.rpm
+            dist/*.AppImage
+            dist/*.flatpak
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: linux-packages
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: airpods-driver-linux-*
+          path: release
+          merge-multiple: true
+
+      - name: Generate checksums
+        working-directory: release
+        run: sha256sum *.deb *.rpm *.AppImage *.flatpak > SHA256SUMS
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          flags=()
+          version_without_metadata="${RELEASE_TAG%%+*}"
+          if [[ "$version_without_metadata" == *-* ]]; then
+            flags+=(--prerelease --latest=false)
+          fi
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" release/*.deb release/*.rpm release/*.AppImage release/*.flatpak release/SHA256SUMS --clobber
+          else
+            gh release create "$RELEASE_TAG" release/*.deb release/*.rpm release/*.AppImage release/*.flatpak release/SHA256SUMS \
+              --verify-tag --title "Airpods Driver $RELEASE_TAG" --generate-notes "${flags[@]}"
+          fi

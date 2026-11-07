@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+    <id>com.vitalyart.airpods-driver</id>
+
+    <name>Airpods Driver</name>
+    <summary>Liberate AirPods from Apple&apos;s ecosystem</summary>
+
+    <metadata_license>CC-BY-SA-4.0</metadata_license>
+    <project_license>AGPL-3.0-only</project_license>
+
+    <description>
+        <p>
+            Check headphone and case battery levels, switch listening modes,
+            and control supported AirPods features from your Linux desktop.
+        </p>
+    </description>
+
+    <launchable type="desktop-id">com.vitalyart.airpods-driver.desktop</launchable>
+</component>

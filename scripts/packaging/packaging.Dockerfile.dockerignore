@@ -1,0 +1,7 @@
+# Docker uses this file instead of the root .dockerignore for this Dockerfile.
+# Keep the allowlist in sync with the root .dockerignore.
+**
+!scripts/
+!scripts/packaging/
+!scripts/packaging/packaging.Dockerfile
+!scripts/packaging/install-appimage-tools.py

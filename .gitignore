@@ -1,0 +1,44 @@
+# Rust build output and packaging
+/target/
+/dist/
+/.cache/packaging/
+/.appdir_path
+/.idea/
+*.flatpak
+/packaging/flatpak/.flatpak-builder/
+/packaging/flatpak/repo/
+/vendor/
+/.cargo/
+
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Editors and operating system files
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+*.log
+
+# Local environment files
+.env
+.env.*
+!.env.example
+
+# Local agent settings and credentials
+/.agents/
+/.codex/
+/.aws/
+/.ssh/
+/.gnupg/
+.envrc
+*.pem
+*.key
