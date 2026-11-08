@@ -83,6 +83,9 @@ def rpm(version, binary, work):
     for directory in ("BUILD", "BUILDROOT", "RPMS", "SOURCES", "SPECS", "SRPMS"):
         (top / directory).mkdir(parents=True)
     stage_files(top / "SOURCES/payload", binary)
+    marker = top / "SOURCES/payload/usr/share/airpods-driver/package-format"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("rpm\n")
     base, _, metadata = version.partition("+")
     base = base.replace("-", "~", 1)
     release = "1" + ("." + metadata.replace("-", ".") if metadata else "")
@@ -93,6 +96,7 @@ Release: {release}
 Summary: AirPods controls for the Linux desktop
 License: AGPL-3.0-only
 Requires: bluez, hicolor-icon-theme, libglvnd-glx, libglvnd-egl
+Recommends: PackageKit, polkit
 Requires: libxkbcommon, libxkbcommon-x11, libwayland-client, libX11-xcb, libXcursor, libXi, libXrandr
 
 %description
@@ -106,6 +110,7 @@ cp -a %{{_sourcedir}}/payload/. %{{buildroot}}/
 
 %files
 /usr/bin/airpods-driver
+/usr/share/airpods-driver/package-format
 /usr/share/applications/{APP_ID}.desktop
 /usr/share/icons/hicolor/256x256/apps/{APP_ID}.png
 %license /usr/share/licenses/airpods-driver/LICENSE

@@ -5,7 +5,8 @@ use crate::devices::enums::*;
 use crate::ui::design::*;
 use crate::ui::messages::BluetoothUIMessage;
 use crate::utils::{MyTheme, get_app_settings_path};
-use iced::widget::{Space, column, container, row, scrollable, text, text_input};
+use crate::system::updates;
+use iced::widget::{Space, column, container, markdown, row, scrollable, text, text_input};
 use iced::{
     Center, Element, Font, Length, Settings, Size, Subscription, Task, Theme, daemon, window,
 };
@@ -69,6 +70,16 @@ pub struct App {
     event_versions: HashMap<(String, u8), u64>,
     errors: HashMap<String, String>,
     app_error: Option<String>,
+    update_preferences: updates::Preferences,
+    update_package: updates::Package,
+    update_available: Option<updates::Available>,
+    update_notes: Vec<markdown::Item>,
+    update_prepared: Option<Arc<updates::Prepared>>,
+    update_status: String,
+    update_busy: bool,
+    update_installed: bool,
+    update_progress: updates::Progress,
+    update_last_attempt: u64,
 }
 pub struct BluetoothState {
     connected_devices: Vec<String>,
@@ -90,6 +101,19 @@ pub enum Command {
 }
 #[derive(Debug, Clone)]
 pub enum Message {
+    CheckUpdates,
+    UpdateTick,
+    AutomaticUpdates(bool),
+    PreviewUpdates(bool),
+    UpdatesChecked(Result<Option<updates::Available>, String>),
+    OpenUpdates,
+    OpenReleaseLink(String),
+    DownloadUpdate,
+    UpdateDownloaded(Result<Arc<updates::Prepared>, String>),
+    InstallUpdate,
+    UpdateInstalled(Result<(), String>),
+    RestartAfterUpdate,
+    RestartFinished(Result<(), String>),
     RequestForget(String),
     CancelForget,
     ConfirmForget(String),
@@ -147,6 +171,8 @@ impl App {
             (Some(id), task.map(Message::WindowOpened))
         };
         let devices = read_devices();
+        let update_preferences = updates::Preferences::load();
+        let check_updates = update_preferences.due();
         let selected_device = settings
             .get("selected_device")
             .and_then(|v| v.as_str())
@@ -188,8 +214,18 @@ impl App {
                 event_versions: HashMap::new(),
                 errors: HashMap::new(),
                 app_error: None,
+                update_preferences,
+                update_package: updates::Package::detect(),
+                update_available: None,
+                update_notes: Vec::new(),
+                update_prepared: None,
+                update_status: String::new(),
+                update_busy: false,
+                update_installed: false,
+                update_progress: Arc::new(std::sync::Mutex::new(String::new())),
+                update_last_attempt: 0,
             },
-            Task::batch([open, Task::perform(wait_for_message(rx), |m| m)]),
+            Task::batch([open, Task::perform(wait_for_message(rx), |m| m), if check_updates { Task::done(Message::CheckUpdates) } else { Task::none() }]),
         )
     }
     fn apply_devices(&mut self, devices: HashMap<String, DeviceData>) -> Task<Message> {
@@ -269,6 +305,126 @@ impl App {
     }
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::AutomaticUpdates(value) => {
+                self.update_preferences.automatic = value;
+                if let Err(e) = self.update_preferences.save() { self.update_status = format!("Could not save update preferences: {e}"); }
+                Task::none()
+            }
+            Message::PreviewUpdates(value) => {
+                if self.update_busy { return Task::none(); }
+                self.update_preferences.preview = value;
+                self.update_available = None;
+                self.update_notes.clear();
+                self.update_prepared = None;
+                if let Err(e) = self.update_preferences.save() { self.update_status = format!("Could not save update preferences: {e}"); }
+                Task::done(Message::CheckUpdates)
+            }
+            Message::UpdateTick => {
+                if self.update_busy {
+                    if let Ok(progress) = self.update_progress.lock() {
+                        if !progress.is_empty() { self.update_status = progress.clone(); }
+                    }
+                }
+                if self.update_preferences.due() && updates::now().saturating_sub(self.update_last_attempt) >= 3600 {
+                    return Task::done(Message::CheckUpdates);
+                }
+                Task::none()
+            }
+            Message::CheckUpdates => {
+                if self.update_busy || self.update_installed || self.update_prepared.is_some() { return Task::none(); }
+                self.update_busy = true;
+                self.update_last_attempt = updates::now();
+                self.update_status = "Checking for updates…".into();
+                if let Ok(mut progress) = self.update_progress.lock() { progress.clear(); }
+                Task::perform(updates::check(self.update_package.clone(), self.update_preferences.preview), Message::UpdatesChecked)
+            }
+            Message::UpdatesChecked(result) => {
+                self.update_busy = false;
+                match result {
+                    Ok(available) => {
+                        self.update_notes = available.as_ref()
+                            .map(|update| markdown::parse(&update.notes).collect())
+                            .unwrap_or_default();
+                        self.update_preferences.last_check = updates::now();
+                        self.update_status = available.as_ref().map(|u| format!("Update available: {}", u.version)).unwrap_or_else(|| "You’re up to date.".into());
+                        self.update_available = available;
+                        if let Err(e) = self.update_preferences.save() { self.update_status.push_str(&format!(" Could not save last check: {e}")); }
+                    }
+                    Err(e) => self.update_status = format!("Could not check for updates: {e}"),
+                }
+                Task::none()
+            }
+            Message::OpenUpdates => {
+                self.selected_tab = Tab::Settings;
+                iced::widget::operation::snap_to_end("main-scroll")
+            }
+            Message::OpenReleaseLink(url) => {
+                if reqwest::Url::parse(&url).is_ok_and(|url| matches!(url.scheme(), "https" | "http")) {
+                    return Task::perform(async move {
+                        let _ = tokio::process::Command::new("xdg-open").arg(url).status().await;
+                    }, |_| Message::TrayUpdated);
+                }
+                Task::none()
+            }
+            Message::DownloadUpdate => {
+                if self.update_busy || self.update_installed { return Task::none(); }
+                if self.update_prepared.is_some() { return Task::none(); }
+                let Some(available) = self.update_available.clone() else { return Task::none() };
+                self.update_busy = true;
+                self.update_status = "Downloading update…".into();
+                if let Ok(mut progress) = self.update_progress.lock() { progress.clear(); }
+                Task::perform(updates::prepare(self.update_package.clone(), available, self.update_progress.clone()), Message::UpdateDownloaded)
+            }
+            Message::UpdateDownloaded(result) => {
+                self.update_busy = false;
+                if let Ok(mut progress) = self.update_progress.lock() { progress.clear(); }
+                match result {
+                    Ok(prepared) => {
+                        self.update_prepared = Some(prepared);
+                        self.update_status = "Download complete. Click Install when you’re ready. The system may ask for your password.".into();
+                    }
+                    Err(e) => self.update_status = format!("Could not download update: {e}"),
+                }
+                Task::none()
+            }
+            Message::InstallUpdate => {
+                if self.update_busy || self.update_installed { return Task::none(); }
+                let Some(prepared) = self.update_prepared.clone() else { return Task::none() };
+                self.update_busy = true;
+                self.update_status = "Installing update… Confirm any system authorization prompt.".into();
+                if let Ok(mut progress) = self.update_progress.lock() { progress.clear(); }
+                Task::perform(updates::install(prepared, self.update_progress.clone()), Message::UpdateInstalled)
+            }
+            Message::UpdateInstalled(result) => {
+                self.update_busy = false;
+                self.update_prepared = None;
+                if let Ok(mut progress) = self.update_progress.lock() { progress.clear(); }
+                match result {
+                    Ok(()) => {
+                        self.update_installed = true;
+                        self.update_available = None;
+                        return Task::done(Message::RestartAfterUpdate);
+                    }
+                    Err(e) => self.update_status = format!("Could not install update: {e}"),
+                }
+                Task::none()
+            }
+            Message::RestartAfterUpdate => {
+                if !self.update_installed || self.update_busy { return Task::none(); }
+                self.update_busy = true;
+                self.update_status = "Update installed. Restarting…".into();
+                Task::perform(crate::system::restart::after_update(self.update_package.clone()), Message::RestartFinished)
+            }
+            Message::RestartFinished(result) => {
+                self.update_busy = false;
+                match result {
+                    Ok(()) => iced::exit(),
+                    Err(error) => {
+                        self.update_status = format!("Update installed, but automatic restart failed: {error}. Try Restart or reopen the app.");
+                        Task::none()
+                    }
+                }
+            }
             Message::RequestForget(mac) => {
                 if self.devices.contains_key(&mac) {
                     self.forget_confirm = Some(mac);
@@ -914,6 +1070,9 @@ impl App {
         .spacing(12)
         .align_y(Center);
         let mut body = column![header].spacing(16);
+        if self.selected_tab != Tab::Settings && (self.update_available.is_some() || self.update_installed) {
+            body = body.push(self.update_card());
+        }
         if let Some(error) = &self.pairing_error {
             body = body.push(card(text(error).size(13)));
         }
@@ -949,6 +1108,18 @@ impl App {
                     .push(row![action("Light", Some(Message::ThemeSelected(MyTheme::Light)), self.selected_theme == MyTheme::Light), action("Dark", Some(Message::ThemeSelected(MyTheme::Dark)), self.selected_theme == MyTheme::Dark)].spacing(8))
                     .push(setting("Battery text in tray", "Show a percentage instead of the AirPods icon.", self.tray_text_mode, true, Message::TrayTextModeChanged))
                     .push(setting("Stem track controls", "Double press to skip; triple press to go back. Turn off if your desktop already handles these gestures.", self.stem_control, true, Message::StemControlChanged));
+                body = body.push(text("Updates").size(20))
+                    .push(muted(format!("Installed version: {}", env!("CARGO_PKG_VERSION"))))
+                    .push(setting("Check automatically", "Check for new releases once a day.", self.update_preferences.automatic, true, Message::AutomaticUpdates))
+                    .push(setting("Preview releases", "Include alpha, beta and release candidate versions.", self.update_preferences.preview, !self.update_busy, Message::PreviewUpdates))
+                    .push(text(&self.update_status).size(13))
+                    .push(row![action("Check for updates", (!self.update_busy && !self.update_installed && self.update_prepared.is_none()).then_some(Message::CheckUpdates), false),
+                        action(if self.update_prepared.is_some() { "Install" } else { "Update" },
+                            (!self.update_busy && self.update_available.is_some() && !self.update_installed)
+                                .then(|| if self.update_prepared.is_some() { Message::InstallUpdate } else { Message::DownloadUpdate }), true)].spacing(8));
+                if self.update_installed {
+                    body = body.push(action("Restart", (!self.update_busy).then_some(Message::RestartAfterUpdate), true));
+                }
             }
             _ => {
                 if let Some(id) = &self.selected_device {
@@ -1068,7 +1239,7 @@ impl App {
                 }
             }
         }
-        container(scrollable(body.padding(24).width(Length::Fill)).height(Length::Fill))
+        container(scrollable(body.padding(24).width(Length::Fill)).id("main-scroll").height(Length::Fill))
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
@@ -1076,8 +1247,42 @@ impl App {
     fn theme(&self, _: window::Id) -> Theme {
         self.selected_theme.into()
     }
+    fn update_card(&self) -> Element<'_, Message> {
+        let Some(update) = &self.update_available else {
+            return card(column![text("Update installed").size(18), muted(&self.update_status),
+                action("Restart", (!self.update_busy).then_some(Message::RestartAfterUpdate), true)].spacing(10)).into();
+        };
+        let mut content = column![text(format!("Update available · {}", update.version)).size(18)].spacing(14);
+        if self.update_status != format!("Update available: {}", update.version) {
+            content = content.push(muted(&self.update_status));
+        }
+        if self.update_notes.is_empty() {
+            content = content.push(muted("No release notes provided."));
+        } else {
+            let theme: Theme = self.selected_theme.into();
+            let settings = markdown::Settings {
+                h1_size: 20.into(), h2_size: 17.into(), h3_size: 15.into(),
+                h4_size: 14.into(), spacing: 8.into(),
+                ..markdown::Settings::with_text_size(13, &theme)
+            };
+            let notes = markdown::view(&self.update_notes, settings).map(Message::OpenReleaseLink);
+            content = content.push(container(scrollable(container(notes).padding([0, 6]))
+                .direction(scrollable::Direction::Vertical(scrollable::Scrollbar::new()
+                    .width(4).scroller_width(4).margin(2))))
+                .max_height(220));
+        }
+        let update_button = iced::widget::button(text("Update").size(13).width(Length::Fill).center())
+            .width(Length::Fill).padding([14, 8]).on_press(Message::OpenUpdates)
+            .style(|theme, status| iced::widget::button::Style {
+                border: iced::Border { radius: 12.into(), ..Default::default() },
+                ..iced::widget::button::primary(theme, status)
+            });
+        content = content.push(super::focus::control(update_button, Some(Message::OpenUpdates)));
+        card(content).into()
+    }
     fn subscription(&self) -> Subscription<Message> {
         Subscription::batch([
+            iced::time::every(std::time::Duration::from_secs(1)).map(|_| Message::UpdateTick),
             window::close_events().map(Message::WindowClosed),
             iced::keyboard::listen().filter_map(|event| match event {
                 iced::keyboard::Event::KeyPressed {
@@ -1217,6 +1422,61 @@ fn app_icon() -> Option<window::Icon> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn successful_update_requests_restart_and_failure_does_not() {
+        let mut failed = app();
+        let mut app = app();
+        app.update_busy = true;
+        assert!(app.update(Message::UpdateInstalled(Ok(()))).units() > 0);
+        assert!(app.update_installed);
+        assert!(!app.update_busy);
+        assert!(app.update(Message::RestartAfterUpdate).units() > 0);
+        assert!(app.update_busy);
+        assert_eq!(app.update(Message::RestartAfterUpdate).units(), 0);
+        let task = app.update(Message::RestartFinished(Err("test failure".into())));
+        assert_eq!(task.units(), 0);
+        assert!(app.update_installed);
+        assert!(!app.update_busy);
+        assert!(app.update_status.contains("test failure"));
+        assert!(app.update(Message::RestartAfterUpdate).units() > 0);
+
+        assert_eq!(failed.update(Message::UpdateInstalled(Err("cancelled".into()))).units(), 0);
+        assert!(!failed.update_installed);
+        assert_eq!(failed.update(Message::RestartAfterUpdate).units(), 0);
+    }
+    #[test]
+    fn downloaded_update_waits_for_explicit_install_action() {
+        let mut app = app();
+        app.update_busy = true;
+        *app.update_progress.lock().unwrap() = "Downloading: 100%".into();
+        let prepared = updates::Prepared::fixture(updates::Package::Unsupported, b"download");
+        let task = app.update(Message::UpdateDownloaded(Ok(prepared)));
+        assert_eq!(task.units(), 0, "Download completion must not start an installer");
+        assert!(!app.update_busy);
+        assert!(!app.update_installed);
+        assert!(app.update_prepared.is_some());
+        assert!(app.update_status.contains("Click Install"));
+        assert!(app.update_progress.lock().unwrap().is_empty());
+        assert_eq!(app.update(Message::CheckUpdates).units(), 0);
+        assert!(app.update_prepared.is_some());
+        assert!(app.update(Message::InstallUpdate).units() > 0);
+        assert!(app.update_busy);
+    }
+
+    #[test]
+    fn update_navigation_opens_settings_and_requests_scroll() {
+        let mut app = app();
+        let task = app.update(Message::OpenUpdates);
+        assert_eq!(app.selected_tab, Tab::Settings);
+        assert!(task.units() > 0);
+    }
+
+    #[test]
+    fn install_without_a_download_does_nothing() {
+        let mut app = app();
+        assert_eq!(app.update(Message::InstallUpdate).units(), 0);
+        assert!(!app.update_busy);
+    }
     fn app() -> App {
         let (_, rx) = tokio::sync::mpsc::unbounded_channel();
         let (mut app, _) = App::new(

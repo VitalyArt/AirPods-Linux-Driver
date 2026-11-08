@@ -93,6 +93,8 @@ def main():
         stage = work / "package"
         (stage / "DEBIAN").mkdir(parents=True)
         install(binary, stage / "usr/bin/airpods-driver", 0o755)
+        (stage / "usr/share/airpods-driver").mkdir(parents=True, exist_ok=True)
+        (stage / "usr/share/airpods-driver/package-format").write_text("deb\n")
         install(ROOT / f"packaging/desktop/{APP_ID}.desktop", stage / f"usr/share/applications/{APP_ID}.desktop")
         install(ROOT / "assets/icon.png", stage / f"usr/share/icons/hicolor/256x256/apps/{APP_ID}.png")
         install(ROOT / "LICENSE", stage / "usr/share/doc/airpods-driver/copyright")
@@ -123,7 +125,7 @@ def main():
             "Section: sound\nPriority: optional\n"
             "Maintainer: VitalyArt <noreply@vitaly.art>\n"
             f"Installed-Size: {installed_size}\nDepends: {dependencies}, {runtime}\n"
-            "Recommends: pulseaudio | pipewire-pulse\n"
+            "Recommends: pulseaudio | pipewire-pulse, packagekit, policykit-1\n"
             "Description: AirPods controls for the Linux desktop\n"
             " View headphone and case battery levels, switch listening modes,\n"
             " and control supported AirPods features from a window or system tray.\n"

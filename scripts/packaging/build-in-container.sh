@@ -40,4 +40,5 @@ case "$format" in
 esac
 if [[ "$format" == all || "$format" == flatpak ]]; then
     dbus-run-session -- bash scripts/verify/verify-flatpak.sh dist/*.flatpak
+    dbus-run-session -- bash scripts/verify/verify-flatpak-update.sh
 fi
