@@ -3,6 +3,55 @@
 The four downloadable formats are DEB, RPM, AppImage and a single-file Flatpak bundle.
 All are distributed as GitHub release files; no application is submitted to a store.
 
+## Application updates
+
+Official packages check this repository's GitHub Releases once a day while the GUI
+is running. Preferences → Updates also provides a manual check, preview releases,
+and an Update button. Update downloads and verifies the package. When the download
+finishes, a separate Install button appears; only clicking Install starts the
+system installer and any authorization prompt. The verified file remains cached
+while the app is running and is checked again before installation. The main-window
+update card renders the GitHub release notes as Markdown, with a bounded scroll
+area for long descriptions and an Update button below the notes. The button opens settings
+and scrolls to the update controls. Failed
+automatic checks are retried no more than once an hour. After successful installation,
+the application automatically restarts into the new version and opens its window.
+If restarting fails, the installed update is retained and a Restart button allows
+another attempt. Headless mode does not check for updates.
+
+The updater selects the current package format and CPU architecture, requires a
+newer SemVer version, downloads over HTTPS, and checks the size and SHA256 against
+the release's `SHA256SUMS` (and GitHub asset digest when present). These checks
+protect download integrity; they are not independent release signatures. The
+GitHub repository and its release publishing credentials remain the trust source.
+
+- DEB and RPM use PackageKit over system D-Bus and wait for the transaction's
+  completion. PackageKit, a suitable distribution backend, and a desktop PolicyKit
+  authentication agent must be available. No APT or RPM repository is needed.
+  The app itself runs without root privileges; authorization belongs to PackageKit.
+  If a transaction times out, its installer is retained in the update cache until
+  its state can be checked in the system package manager.
+- AppImage replaces the original file atomically after verification, keeping the
+  previous executable as `<original filename>.previous`. The directory must be
+  writable. The process then re-executes the original AppImage path with its old
+  mount and library environment cleared, so the updated image is mounted afresh.
+- Flatpak downloads a bundle into its persistent cache and invokes the host's
+  `flatpak install --bundle --or-update` through `flatpak-spawn --host`. It retains
+  the current default system or standard per-user installation. Custom Flatpak
+  installation paths are currently unsupported. No Flatpak repository is required
+  for application updates; runtime dependencies can still require Flathub.
+  `--talk-name=org.freedesktop.Flatpak` deliberately permits host command execution
+  for this installer, which weakens sandbox isolation. No general host filesystem
+  permission is added. Downloads are removed after the installer finishes.
+  A host helper waits for the old Flatpak instance to exit before launching the
+  updated deployment in the same installation. It intentionally runs without
+  `--watch-bus` so it survives the old sandbox closing.
+
+Source builds and `make install` builds do not replace themselves with packages.
+The first release containing the updater must be installed manually; earlier
+versions cannot acquire this feature on their own. Future package formats require
+an explicit installation backend rather than guessing from the Linux distribution.
+
 ## Build all formats
 
 ```bash
@@ -86,6 +135,10 @@ This catches missing dynamically loaded GUI libraries that a `--version` check w
 
 The commands live in `scripts/verify/verify-installed.sh`, `scripts/verify/verify-appimage.sh`, and
 `scripts/verify/verify-flatpak.sh`, with GUI startup in `scripts/verify/verify-gui.sh`.
+Flatpak builds also run `scripts/verify/verify-flatpak-update.sh`, which installs
+two fixture bundles and verifies that a sandboxed application can update itself
+through the host installer and launch the new version. This requires the same
+dedicated container and runtime as the other Flatpak checks.
 These are installation and startup checks, not Bluetooth
 hardware tests. Do not run native package installation checks on a development machine
 unless you intend to install the application there.
