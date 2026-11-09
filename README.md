@@ -13,6 +13,7 @@ Your AirPods controls, right on your Linux desktop. Check battery levels, switch
 - Pair nearby AirPods and switch between saved headphones.
 - Access battery readings and listening controls from the system tray.
 - Choose a light or dark appearance.
+- Start automatically at login, minimized to the system tray.
 
 Available features depend on your headphone model and firmware. Hearing aid controls are not available.
 
@@ -123,3 +124,7 @@ If you forget AirPods through your computer's Bluetooth settings, they are also 
 ## About Airpods Driver
 
 Based on [LibrePods](https://github.com/kavishdevar/librepods), with thanks to the project and its contributors. See [LICENSE](LICENSE) for license information.
+
+Autostart is enabled on first launch, including after upgrading from a version without this feature.
+Use **Settings → Start at login** to disable it. Later updates preserve your choice.
+For AppImage, keep the file in a permanent location; if you move it, toggle this setting off and on again.

@@ -94,6 +94,9 @@ fn main() -> iced::Result {
 
     // Load stem_control initial value from settings JSON, then apply CLI override.
     if args.no_tray {
+        if let Err(error) = system::autostart::initialize() {
+            warn!("Could not initialize autostart: {error}");
+        }
         // Run headless without UI
         info!("Running in headless mode (no GUI)");
         let rt = tokio::runtime::Runtime::new().unwrap();
