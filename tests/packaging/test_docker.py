@@ -77,3 +77,23 @@ if sys.argv[1:3] == ["image", "inspect"]:
                                     capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("Package binary missing", result.stderr)
+
+    def test_export_binary_without_compilation(self):
+        import platform
+        script = Path(__file__).resolve().parents[2] / "scripts/packaging/build-binary.py"
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "input"
+            destination = Path(temporary) / "output" / "airpods-driver"
+            header = bytearray(20)
+            header[:4] = b"\x7fELF"
+            header[5] = 1
+            header[18:20] = {"x86_64": 62, "aarch64": 183}[platform.machine()].to_bytes(2, "little")
+            source.write_bytes(header)
+            env = dict(os.environ, AIRPODS_DRIVER_PACKAGE_BINARY=str(source))
+            subprocess.run(["python3", str(script), str(destination)], env=env, check=True)
+            self.assertEqual(destination.read_bytes(), header)
+            self.assertEqual(destination.stat().st_mode & 0o777, 0o755)
+            source.write_bytes(b"invalid")
+            result = subprocess.run(["python3", str(script), str(destination)],
+                                    env=env, capture_output=True)
+            self.assertNotEqual(result.returncode, 0)

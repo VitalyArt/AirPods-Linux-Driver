@@ -28,7 +28,7 @@ if [[ "$format" == all || "$format" == flatpak ]]; then
 fi
 case "$format" in
     binary)
-        python3 -c 'import sys, platform; from pathlib import Path; sys.path.insert(0, "scripts/packaging"); from build_linux import build_binary; from build_deb import install; install(build_binary(platform.machine()), Path("/out/airpods-driver"), 0o755)'
+        python3 scripts/packaging/build-binary.py /out/airpods-driver
         chown "$OUTPUT_UID:$OUTPUT_GID" /out/airpods-driver
         ;;
     all) dbus-run-session -- python3 scripts/packaging/build-packages.py ;;
