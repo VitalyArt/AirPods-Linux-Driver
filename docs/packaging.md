@@ -176,9 +176,9 @@ dpkg-deb --contents dist/*.deb
 
 ## CI and releases
 
-Pushes and pull requests run tests, build all four formats for both architectures, verify package installation,
+Pushes to main and pull requests test and compile one binary per architecture, then package it in parallel jobs for DEB, RPM, AppImage and Flatpak, verify package installation,
 and upload workflow artifacts. The workflow can also be run manually.
-Publishing occurs only for tags beginning with `v` and after both builds succeed.
+Publishing occurs only for tags beginning with `v` and after all eight packaging jobs succeed. Intermediate binaries and Docker images are shared as one-day artifacts.
 
 1. Commit and push the source and workflow files to GitHub.
 2. Create and push a release tag:
