@@ -61,6 +61,9 @@ pub struct App {
     device_states: HashMap<String, DeviceState>,
     device_managers: Arc<RwLock<HashMap<String, DeviceManagers>>>,
     tray_handle: Option<super::tray::TrayHandle>,
+    autostart_enabled: bool,
+    autostart_busy: bool,
+    autostart_error: Option<String>,
     tray_text_mode: bool,
     stem_control: bool,
     rename: String,
@@ -101,6 +104,8 @@ pub enum Command {
 }
 #[derive(Debug, Clone)]
 pub enum Message {
+    AutostartChanged(bool),
+    AutostartLoaded(Result<bool, String>),
     CheckUpdates,
     UpdateTick,
     AutomaticUpdates(bool),
@@ -199,6 +204,9 @@ impl App {
                 device_states: HashMap::new(),
                 device_managers: managers,
                 tray_handle: None,
+                autostart_enabled: false,
+                autostart_busy: true,
+                autostart_error: None,
                 tray_text_mode: settings
                     .get("tray_text_mode")
                     .and_then(|v| v.as_bool())
@@ -225,7 +233,7 @@ impl App {
                 update_progress: Arc::new(std::sync::Mutex::new(String::new())),
                 update_last_attempt: 0,
             },
-            Task::batch([open, Task::perform(wait_for_message(rx), |m| m), if check_updates { Task::done(Message::CheckUpdates) } else { Task::none() }]),
+            Task::batch([open, Task::perform(async { tokio::task::spawn_blocking(crate::system::autostart::initialize).await.map_err(|e| e.to_string()).and_then(|v| v) }, Message::AutostartLoaded), Task::perform(wait_for_message(rx), |m| m), if check_updates { Task::done(Message::CheckUpdates) } else { Task::none() }]),
         )
     }
     fn apply_devices(&mut self, devices: HashMap<String, DeviceData>) -> Task<Message> {
@@ -305,6 +313,24 @@ impl App {
     }
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::AutostartChanged(value) => {
+                if self.autostart_busy { return Task::none(); }
+                self.autostart_busy = true;
+                self.autostart_error = None;
+                Task::perform(async move {
+                    tokio::task::spawn_blocking(move || crate::system::autostart::set_enabled(value))
+                        .await.map_err(|e| e.to_string()).and_then(|v| v)
+                }, Message::AutostartLoaded)
+            }
+            Message::AutostartLoaded(result) => {
+                self.autostart_busy = false;
+                match result {
+                    Ok(value) => { self.autostart_enabled = value; self.autostart_error = None; }
+                    Err(error) => self.autostart_error = Some(format!("Could not configure autostart: {error}")),
+                }
+                Task::none()
+            }
+
             Message::AutomaticUpdates(value) => {
                 self.update_preferences.automatic = value;
                 if let Err(e) = self.update_preferences.save() { self.update_status = format!("Could not save update preferences: {e}"); }
@@ -1106,8 +1132,10 @@ impl App {
                 body = body.push(text("Preferences").size(28)).push(muted("Make yourself at home."))
                     .push(text("Appearance").size(15))
                     .push(row![action("Light", Some(Message::ThemeSelected(MyTheme::Light)), self.selected_theme == MyTheme::Light), action("Dark", Some(Message::ThemeSelected(MyTheme::Dark)), self.selected_theme == MyTheme::Dark)].spacing(8))
+                    .push(setting("Start at login", "Launch minimized to the system tray when you sign in.", self.autostart_enabled, !self.autostart_busy, Message::AutostartChanged))
                     .push(setting("Battery text in tray", "Show a percentage instead of the AirPods icon.", self.tray_text_mode, true, Message::TrayTextModeChanged))
                     .push(setting("Stem track controls", "Double press to skip; triple press to go back. Turn off if your desktop already handles these gestures.", self.stem_control, true, Message::StemControlChanged));
+                if let Some(error) = &self.autostart_error { body = body.push(muted(error)); }
                 body = body.push(text("Updates").size(20))
                     .push(muted(format!("Installed version: {}", env!("CARGO_PKG_VERSION"))))
                     .push(setting("Check automatically", "Check for new releases once a day.", self.update_preferences.automatic, true, Message::AutomaticUpdates))
