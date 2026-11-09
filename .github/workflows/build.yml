@@ -2,7 +2,7 @@ name: Build and release
 
 on:
   push:
-    branches: ["**"]
+    branches: ["main"]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
@@ -15,8 +15,8 @@ concurrency:
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
-  linux-packages:
-    name: Linux packages (${{ matrix.arch }})
+  build-binary:
+    name: Release binary (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
     env:
@@ -65,14 +65,6 @@ jobs:
             cargo-v1-${{ runner.os }}-${{ matrix.arch }}-${{ steps.packaging-image.outputs.imageid }}-${{ hashFiles('Cargo.lock') }}-
             cargo-v1-${{ runner.os }}-${{ matrix.arch }}-${{ steps.packaging-image.outputs.imageid }}-
 
-      - name: Restore Flatpak runtime cache
-        uses: actions/cache@v4
-        with:
-          path: .cache/packaging/flatpak-${{ matrix.arch }}
-          key: flatpak-v1-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('packaging/flatpak/package.json') }}-${{ github.sha }}
-          restore-keys: |
-            flatpak-v1-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('packaging/flatpak/package.json') }}-
-
       - name: Prepare caches for the root user in the container
         env:
           PACKAGE_ARCH: ${{ matrix.arch }}
@@ -84,10 +76,88 @@ jobs:
       - name: Test in packaging container
         run: bash scripts/packaging/package-docker.sh test
 
-      - name: Build and verify all four formats in Docker
-        run: make build-packages
+      - name: Build release binary
+        run: bash scripts/packaging/package-docker.sh binary
 
-      - name: Verify DEB installation in a clean Ubuntu container
+      - name: Export packaging image
+        run: docker save "$PACKAGING_IMAGE" | zstd -T0 -o dist/packaging-image.tar.zst
+
+      - name: Make container caches readable for saving
+        if: always()
+        run: |
+          if [[ -d "$PACKAGING_CACHE_DIR" ]]; then
+            sudo chown -R "$(id -u):$(id -g)" "$PACKAGING_CACHE_DIR"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.arch }}
+          path: dist/airpods-driver
+          retention-days: 1
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packaging-image-${{ matrix.arch }}
+          path: dist/packaging-image.tar.zst
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+
+  linux-packages:
+    name: Package (${{ matrix.arch }}, ${{ matrix.format }})
+    needs: build-binary
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    env:
+      PACKAGING_IMAGE: airpods-driver-packaging:ubuntu24
+      PACKAGING_SKIP_IMAGE_BUILD: "1"
+      PACKAGING_CACHE_DIR: ${{ github.workspace }}/.cache/packaging
+      AIRPODS_DRIVER_PACKAGE_BINARY: ${{ github.workspace }}/.ci-input/airpods-driver
+      RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+        format: [deb, rpm, appimage, flatpak]
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: binary-${{ matrix.arch }}
+          path: .ci-input
+      - uses: actions/download-artifact@v4
+        with:
+          name: packaging-image-${{ matrix.arch }}
+          path: .ci-image
+      - name: Load build environment
+        run: |
+          zstd -dc .ci-image/packaging-image.tar.zst | docker load
+          chmod 755 "$AIRPODS_DRIVER_PACKAGE_BINARY"
+
+      - if: matrix.format == 'flatpak'
+        name: Restore Flatpak runtime cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/packaging/flatpak-${{ matrix.arch }}
+          key: flatpak-v1-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('packaging/flatpak/package.json') }}-${{ github.sha }}
+          restore-keys: |
+            flatpak-v1-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('packaging/flatpak/package.json') }}-
+
+      - name: Package supplied binary
+        env:
+          PACKAGE_FORMAT: ${{ matrix.format }}
+        run: bash scripts/packaging/package-docker.sh "$PACKAGE_FORMAT"
+
+      - if: matrix.format == 'deb'
+        name: Verify DEB installation in a clean Ubuntu container
         run: |
           docker run --rm -v "$PWD:/src:ro" -w /src ubuntu:24.04 bash -ec '
             apt-get update
@@ -97,7 +167,8 @@ jobs:
             apt-get remove -y airpods-driver
             test ! -e /usr/bin/airpods-driver'
 
-      - name: Verify RPM installation in a clean Fedora container
+      - if: matrix.format == 'rpm'
+        name: Verify RPM installation in a clean Fedora container
         run: |
           docker run --rm -v "$PWD:/src:ro" -w /src fedora:43 bash -ec '
             dnf install -y /src/dist/*.rpm desktop-file-utils xorg-x11-server-Xvfb xwininfo dbus-daemon mesa-dri-drivers
@@ -106,7 +177,8 @@ jobs:
             dnf remove -y airpods-driver
             test ! -e /usr/bin/airpods-driver'
 
-      - name: Verify AppImage in a clean Ubuntu container without FUSE
+      - if: matrix.format == 'appimage'
+        name: Verify AppImage in a clean Ubuntu container without FUSE
         run: |
           docker run --rm -v "$PWD:/src:ro" -w /src ubuntu:24.04 bash -ec '
             apt-get update
@@ -123,7 +195,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: airpods-driver-linux-${{ matrix.arch }}
+          name: airpods-driver-linux-${{ matrix.arch }}-${{ matrix.format }}
           path: |
             dist/*.deb
             dist/*.rpm

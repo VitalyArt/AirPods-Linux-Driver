@@ -26,7 +26,7 @@ if sys.argv[1:3] == ["image", "inspect"]:
             env.pop("PACKAGING_CACHE_DIR", None)
             env.pop("PACKAGING_SKIP_IMAGE_BUILD", None)
             env.pop("DOCKER_TEST_ARCH", None)
-            for format in ("all", "deb", "rpm", "appimage", "flatpak", "test"):
+            for format in ("all", "deb", "rpm", "appimage", "flatpak", "test", "binary"):
                 with self.subTest(format=format):
                     log.write_text("")
                     subprocess.run(["bash", str(script), format], env=env, check=True)
@@ -63,3 +63,17 @@ if sys.argv[1:3] == ["image", "inspect"]:
                         self.assertTrue((cache / directory).is_dir())
                         self.assertIn(f"type=bind,src={cache / directory},dst={destination}", mounts)
                     self.assertFalse(any(m.startswith("type=volume,") for m in mounts))
+
+    def test_missing_supplied_binary_fails(self):
+        script = Path(__file__).resolve().parents[2] / "scripts/packaging/package-docker.sh"
+        with tempfile.TemporaryDirectory() as temporary:
+            docker = Path(temporary) / "docker"
+            docker.write_text("#!/bin/sh\nif [ \"$1\" = image ]; then echo amd64; fi\n")
+            docker.chmod(0o755)
+            env = dict(os.environ, PATH=f"{temporary}:{os.environ['PATH']}",
+                       PACKAGING_SKIP_IMAGE_BUILD="1",
+                       AIRPODS_DRIVER_PACKAGE_BINARY=str(Path(temporary) / "missing"))
+            result = subprocess.run(["bash", str(script), "deb"], env=env,
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Package binary missing", result.stderr)

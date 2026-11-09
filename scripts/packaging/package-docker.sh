@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 format=${1:-all}
-case "$format" in all|deb|rpm|appimage|flatpak|test) ;; *) echo "Unknown packaging command: $format" >&2; exit 2 ;; esac
+case "$format" in all|deb|rpm|appimage|flatpak|test|binary) ;; *) echo "Unknown packaging command: $format" >&2; exit 2 ;; esac
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 image=${PACKAGING_IMAGE:-airpods-driver-packaging:ubuntu24}
 command -v docker >/dev/null || { echo 'Docker is required to build packages.' >&2; exit 1; }
@@ -31,6 +31,12 @@ else
     )
 fi
 options=()
+if [[ -n "${AIRPODS_DRIVER_PACKAGE_BINARY:-}" ]]; then
+    [[ -f "$AIRPODS_DRIVER_PACKAGE_BINARY" ]] || { echo "Package binary missing" >&2; exit 1; }
+    supplied_binary=$(realpath -- "$AIRPODS_DRIVER_PACKAGE_BINARY")
+    options+=(--mount "type=bind,src=$supplied_binary,dst=/input/airpods-driver,readonly"
+        -e AIRPODS_DRIVER_PACKAGE_BINARY=/input/airpods-driver)
+fi
 if [[ "$format" == all || "$format" == flatpak ]]; then
     # Flatpak needs nested sandbox namespaces inside this dedicated container.
     options+=(--privileged --security-opt apparmor=unconfined)

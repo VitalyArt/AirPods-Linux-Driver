@@ -27,6 +27,10 @@ if [[ "$format" == all || "$format" == flatpak ]]; then
     flatpak config --user --set languages en
 fi
 case "$format" in
+    binary)
+        python3 -c 'import sys, platform; from pathlib import Path; sys.path.insert(0, "scripts/packaging"); from build_linux import build_binary; from build_deb import install; install(build_binary(platform.machine()), Path("/out/airpods-driver"), 0o755)'
+        chown "$OUTPUT_UID:$OUTPUT_GID" /out/airpods-driver
+        ;;
     all) dbus-run-session -- python3 scripts/packaging/build-packages.py ;;
     deb) python3 scripts/packaging/build-deb.py ;;
     rpm|appimage) python3 scripts/packaging/build-linux.py "$format" ;;
