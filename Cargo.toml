@@ -24,6 +24,7 @@ aes = "0.9.0-rc.4"
 futures = "0.3.32"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
 semver = "1.0"
+pulldown-cmark = { version = "0.12.2", default-features = false }
 sha2 = "0.10"
 tempfile = "3"
 

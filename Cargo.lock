@@ -75,6 +75,7 @@ dependencies = [
  "ksni",
  "libpulse-binding",
  "log",
+ "pulldown-cmark",
  "reqwest",
  "semver",
  "serde",

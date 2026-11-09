@@ -369,7 +369,7 @@ impl App {
                 match result {
                     Ok(available) => {
                         self.update_notes = available.as_ref()
-                            .map(|update| markdown::parse(&update.notes).collect())
+                            .map(|update| super::release_notes::parse(&update.notes))
                             .unwrap_or_default();
                         self.update_preferences.last_check = updates::now();
                         self.update_status = available.as_ref().map(|u| format!("Update available: {}", u.version)).unwrap_or_else(|| "You’re up to date.".into());
@@ -387,7 +387,27 @@ impl App {
             Message::OpenReleaseLink(url) => {
                 if reqwest::Url::parse(&url).is_ok_and(|url| matches!(url.scheme(), "https" | "http")) {
                     return Task::perform(async move {
-                        let _ = tokio::process::Command::new("xdg-open").arg(url).status().await;
+                        let mut command = if std::path::Path::new("/.flatpak-info").exists() {
+                            let mut command = tokio::process::Command::new("flatpak-spawn");
+                            command.args(["--host", "xdg-open"]);
+                            command
+                        } else {
+                            let mut command = tokio::process::Command::new("xdg-open");
+                            // The desktop browser must use host libraries, not those
+                            // bundled by the AppImage launcher.
+                            if std::env::var_os("APPIMAGE").is_some()
+                                || std::env::var_os("APPDIR").is_some()
+                            {
+                                command.env_remove("LD_LIBRARY_PATH");
+                                command.env_remove("LD_PRELOAD");
+                            }
+                            command
+                        };
+                        match command.arg(&url).status().await {
+                            Ok(status) if status.success() => {}
+                            Ok(status) => error!("Could not open release link {url}: {status}"),
+                            Err(error) => error!("Could not open release link {url}: {error}"),
+                        }
                     }, |_| Message::TrayUpdated);
                 }
                 Task::none()
