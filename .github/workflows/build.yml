@@ -151,6 +151,14 @@ jobs:
           restore-keys: |
             flatpak-v1-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('packaging/flatpak/package.json') }}-
 
+      - name: Prepare Flatpak cache ownership
+        if: matrix.format == 'flatpak'
+        env:
+          PACKAGE_ARCH: ${{ matrix.arch }}
+        run: |
+          mkdir -p "$PACKAGING_CACHE_DIR/flatpak-$PACKAGE_ARCH"
+          sudo chown -R root:root "$PACKAGING_CACHE_DIR/flatpak-$PACKAGE_ARCH"
+
       - name: Package supplied binary
         env:
           PACKAGE_FORMAT: ${{ matrix.format }}
