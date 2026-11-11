@@ -167,17 +167,7 @@ jobs:
       - if: matrix.format == 'deb'
         name: Verify DEB installation in a clean Ubuntu container
         run: |
-          # Use the runner network to avoid DNS failures on Docker's bridge.
-          docker run --rm --network host -v "$PWD:/src:ro" -w /src ubuntu:24.04 bash -ec '
-            echo "Resolver configuration:"
-            cat /etc/resolv.conf
-            echo "DNS as root:"
-            getent hosts archive.ubuntu.com || true
-            echo "DNS as the APT sandbox user:"
-            runuser -u _apt -- getent hosts archive.ubuntu.com || true
-            # This disposable verification container already runs as root.
-            # Keep APT downloads under that user instead of switching to _apt.
-            printf "APT::Sandbox::User \"root\";\n" > /etc/apt/apt.conf.d/99ci-sandbox
+          bash scripts/verify/ubuntu-container.sh -v "$PWD:/src:ro" -w /src ubuntu:24.04 bash -ec '
             apt-get -o APT::Update::Error-Mode=any -o Acquire::Retries=3 update
             apt-get install -y /src/dist/*.deb desktop-file-utils xvfb x11-utils dbus-x11 libgl1-mesa-dri
             bash scripts/verify/verify-installed.sh
@@ -198,17 +188,7 @@ jobs:
       - if: matrix.format == 'appimage'
         name: Verify AppImage in a clean Ubuntu container without FUSE
         run: |
-          # Use the runner network to avoid DNS failures on Docker's bridge.
-          docker run --rm --network host -v "$PWD:/src:ro" -w /src ubuntu:24.04 bash -ec '
-            echo "Resolver configuration:"
-            cat /etc/resolv.conf
-            echo "DNS as root:"
-            getent hosts archive.ubuntu.com || true
-            echo "DNS as the APT sandbox user:"
-            runuser -u _apt -- getent hosts archive.ubuntu.com || true
-            # This disposable verification container already runs as root.
-            # Keep APT downloads under that user instead of switching to _apt.
-            printf "APT::Sandbox::User \"root\";\n" > /etc/apt/apt.conf.d/99ci-sandbox
+          bash scripts/verify/ubuntu-container.sh -v "$PWD:/src:ro" -w /src ubuntu:24.04 bash -ec '
             apt-get -o APT::Update::Error-Mode=any -o Acquire::Retries=3 update
             apt-get install -y desktop-file-utils libx11-6 libx11-xcb1 libgl1 libegl1 libwayland-client0 xvfb x11-utils dbus-x11 libgl1-mesa-dri
             bash scripts/verify/verify-appimage.sh /src/dist/*.AppImage
