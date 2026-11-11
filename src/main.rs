@@ -125,6 +125,7 @@ async fn async_main(
     device_managers: Arc<RwLock<HashMap<String, DeviceManagers>>>,
 ) -> bluer::Result<()> {
     let args = Args::parse();
+    system::integration::start(device_managers.clone());
 
     let tray_handle = if args.no_tray {
         None
