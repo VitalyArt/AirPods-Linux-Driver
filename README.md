@@ -7,6 +7,7 @@ Your AirPods controls, right on your Linux desktop. Check battery levels, switch
 ## What you can do
 
 - Check the battery levels of your earbuds and charging case.
+- Receive desktop notifications when a non-charging earbud or case reaches 20% or below.
 - Switch between Noise Cancellation, Transparency, Adaptive, and Off modes.
 - Enable Conversation Awareness and Personalized Volume.
 - Automatically pause and resume playback when you take your AirPods out or put them back in.
@@ -63,6 +64,8 @@ You can also pair AirPods through your computer's Bluetooth settings, then retur
 The main screen shows the available battery readings for your headphones and case. Charging indicators help you see which parts are charging.
 
 A dash (**—**) means a reading is currently unavailable. The case may not always report its battery level, and nearby readings can be approximate. Reconnect your headphones if readings stop updating.
+
+Low-battery notifications are automatic and need no configuration. Each component alerts once at 20% or below, and can alert again after its charge reaches 30%. Reconnecting does not repeat an alert during the same application session. Notifications require a desktop notification service and follow your desktop’s notification settings.
 
 ## Choose how you listen
 

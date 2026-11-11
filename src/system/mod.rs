@@ -3,3 +3,4 @@ pub(crate) mod single_instance;
 pub(crate) mod updates;
 pub(crate) mod restart;
 pub(crate) mod autostart;
+pub(crate) mod battery_notifications;
