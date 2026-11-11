@@ -255,6 +255,9 @@ impl AirPodsDevice {
                     }
                     AACPEvent::BatteryInfo(battery_info) => {
                         debug!("Received BatteryInfo event: {:?}", battery_info);
+                        crate::system::battery_notifications::notify_low_battery(
+                            &mac_address.to_string(), &battery_info,
+                        ).await;
                         if let Some(handle) = &tray_handle {
                             handle
                                 .update(|tray: &mut MyTray| {

@@ -574,6 +574,10 @@ impl AACPManager {
 
     pub async fn set_event_channel(&self, tx: mpsc::UnboundedSender<AACPEvent>) {
         let mut state = self.state.lock().await;
+        // Battery packets can arrive during the handshake, before subscription.
+        if !state.battery_info.is_empty() {
+            let _ = tx.send(AACPEvent::BatteryInfo(state.battery_info.clone()));
+        }
         state.event_tx = Some(tx);
     }
 
