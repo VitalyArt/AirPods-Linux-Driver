@@ -3,6 +3,7 @@
   "runtime-version": "25.08",
   "finish-args": [
     "--talk-name=org.freedesktop.Flatpak",
+    "--own-name=com.vitalyart.AirpodsDriver",
     "--socket=wayland",
     "--socket=fallback-x11",
     "--socket=pulseaudio",

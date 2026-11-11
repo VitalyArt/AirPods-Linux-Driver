@@ -131,3 +131,10 @@ Based on [LibrePods](https://github.com/kavishdevar/librepods), with thanks to t
 Autostart is enabled on first launch, including after upgrading from a version without this feature.
 Use **Settings → Start at login** to disable it. Later updates preserve your choice.
 For AppImage, keep the file in a permanent location; if you move it, toggle this setting off and on again.
+
+## Desktop integration API
+
+The application provides a session D-Bus API for device state and listening modes,
+and publishes connected headphone charge through BlueZ where BatteryProvider is
+available. See [desktop integration](docs/desktop-integration.md) for commands,
+requirements, and verification.
