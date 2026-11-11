@@ -104,6 +104,7 @@ fn main() -> iced::Result {
         Ok(())
     } else {
         // Run with UI
+        system::session::start();
         let device_managers_clone = device_managers.clone();
         let failure_ui_tx = ui_tx.clone();
         std::thread::spawn(move || {
