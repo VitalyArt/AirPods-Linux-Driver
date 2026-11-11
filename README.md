@@ -122,6 +122,8 @@ If you forget AirPods through your computer's Bluetooth settings, they are also 
 
 **I cannot see the system tray icon.** Your desktop may need tray support enabled. You can still use the main Airpods Driver window.
 
+**After logging out and back in, the app says it is already running but has no tray icon.** An older process may still belong to the previous desktop session. Run `pkill -TERM -x airpods-driver`, then start `airpods-driver` again. Do not delete the lock file: it protects against running two instances. Updated builds monitor the graphical login session through systemd-logind and exit when that session closes.
+
 **The dock shows an old or generic icon.** Restart Airpods Driver. If it is pinned to your dock, try unpinning it and pinning the running application again.
 
 ## About Airpods Driver
