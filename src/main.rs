@@ -109,12 +109,16 @@ fn main() -> iced::Result {
         let failure_ui_tx = ui_tx.clone();
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
-            if let Err(error) = rt.block_on(async_main(ui_tx, device_managers_clone)) {
-                warn!("Bluetooth is unavailable: {error}");
-                let _ = failure_ui_tx.send(BluetoothUIMessage::DiscoveryError(format!(
-                    "Bluetooth is unavailable: {error}"
-                )));
-            }
+            rt.block_on(async move {
+                if let Err(error) = async_main(ui_tx, device_managers_clone).await {
+                    warn!("Bluetooth is unavailable: {error}");
+                    let _ = failure_ui_tx.send(BluetoothUIMessage::DiscoveryError(format!(
+                        "Bluetooth is unavailable: {error}"
+                    )));
+                }
+                // The tray must keep running even if BlueZ is not ready at login.
+                std::future::pending::<()>().await;
+            });
         });
 
         ui::window::start_ui(ui_rx, args.start_minimized, device_managers)
@@ -141,7 +145,14 @@ async fn async_main(
             ui_tx: Some(ui_tx.clone()),
             ..Default::default()
         };
-        match tray.spawn().await {
+        // At login the watcher or its host may start after this application.
+        // Keep the service alive so ksni registers when the watcher appears.
+        match tray
+            .assume_sni_available(true)
+            .disable_dbus_name(std::path::Path::new("/.flatpak-info").exists())
+            .spawn()
+            .await
+        {
             Ok(handle) => {
                 let _ = ui_tx.send(BluetoothUIMessage::TrayReady(crate::ui::tray::TrayHandle(
                     handle.clone(),
