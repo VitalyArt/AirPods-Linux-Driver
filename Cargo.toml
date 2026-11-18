@@ -13,7 +13,7 @@ dbus = "0.9.10"
 hex = "0.4.3"
 iced = { version = "0.14.0", features = ["tokio", "svg", "advanced", "markdown"] }
 libpulse-binding = "2.30.1"
-ksni = "0.3.1"
+ksni = "0.3.3"
 image = { version = "0.25.8", default-features = false, features = ["png"] }
 imageproc = { version = "0.26.1", default-features = false, features = ["text"] }
 ab_glyph = "0.2.32"
